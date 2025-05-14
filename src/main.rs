@@ -54,11 +54,54 @@ fn play_video_locally(video_path: &Path) -> Result<(), Box<dyn std::error::Error
     }
 }
 
+// Enum to control the flow of the main loop when no videos are found
+enum LoopControl {
+    Continue,
+    Break,
+}
+
 #[tokio::main]
 async fn main() {
     if let Err(err) = run_app().await {
         eprintln!("\nApplication Error: {}", err);
         process::exit(1);
+    }
+}
+
+// Helper function to handle the scenario where no video files are found in a folder.
+fn handle_no_videos_found_action(
+    folder_path_display: &str, // Pass as &str to avoid cloning PathBuf just for display
+    theme: &ColorfulTheme,
+    history: &[HistoryEntry], // Pass history as a slice
+    current_folder_path: &mut Option<PathBuf>,
+    cached_folder_scan: &mut Option<(PathBuf, Vec<PathBuf>)>,
+) -> Result<LoopControl, Box<dyn std::error::Error>> {
+    println!("No video files found in '{}'.", folder_path_display);
+    let action = Select::with_theme(theme)
+        .with_prompt("No videos found. What would you like to do?")
+        .items(&["Choose another folder", "View history", "Quit"])
+        .default(0)
+        .interact_opt()?
+        .unwrap_or(2); // Default to Quit if Esc is pressed
+
+    match action {
+        0 => {
+            // Choose another folder
+            *current_folder_path = None;
+            *cached_folder_scan = None;
+            Ok(LoopControl::Continue)
+        }
+        1 => {
+            // View history
+            view_history(history, theme)?;
+            // current_folder_path and cached_folder_scan remain unchanged.
+            // The outer loop will re-evaluate.
+            Ok(LoopControl::Continue)
+        }
+        _ => {
+            // Quit
+            Ok(LoopControl::Break)
+        }
     }
 }
 
@@ -136,12 +179,16 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         let folder_path_to_scan = match current_folder_path.clone() {
             Some(path) => path,
             None => {
-                // Prompt for new folder, invalidate cache
+                // Prompt for a new folder.
+                // Invalidate the cache because we're about to get a new folder path,
+                // so any previous scan results are for a different, now irrelevant, folder.
                 cached_folder_scan = None;
                 PathBuf::from(
                     shellexpand::full(
                         &Input::<String>::with_theme(&theme)
-                            .with_prompt("Enter the path to the video folder (supports ~ and env vars)")
+                            .with_prompt(
+                                "Enter the path to the video folder (supports ~ and env vars)",
+                            )
                             .interact_text()?,
                     )?
                     .into_owned(),
@@ -164,42 +211,36 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                         files
                     }
                     Err(e) => {
-                        eprintln!("Error scanning folder '{}': {}", folder_path_to_scan.display(), e);
+                        eprintln!(
+                            "Error scanning folder '{}': {}",
+                            folder_path_to_scan.display(),
+                            e
+                        );
                         current_folder_path = None; // Reset to re-prompt for folder
                         cached_folder_scan = None; // Clear cache on error
-                        continue 'outer; 
+                        continue 'outer;
                     }
                 }
             }
         };
-        
+
         // Update current_folder_path to the one we just processed/scanned
         // This is important so that "Pick another from this folder" uses the correct path
         current_folder_path = Some(folder_path_to_scan.clone());
 
-
         if video_files_paths.is_empty() {
-            println!("No video files found in '{}'.", folder_path_to_scan.display());
-            let action = Select::with_theme(&theme)
-                .with_prompt("No videos found. What would you like to do?")
-                .items(&["Choose another folder", "View history", "Quit"])
-                .default(0)
-                .interact_opt()?
-                .unwrap_or(2);
-
-            match action {
-                0 => {
-                    current_folder_path = None; // Prompt for a new folder.
-                    cached_folder_scan = None; // Clear cache as folder will change.
-                }
-                1 => {
-                    view_history(&history, &theme)?;
-                    // Don't change current_folder_path or cache here,
-                    // loop will re-evaluate based on existing current_folder_path
-                }
-                _ => break 'outer, 
+            match handle_no_videos_found_action(
+                &folder_path_to_scan.to_string_lossy(), // Pass display string
+                &theme,
+                &history,
+                &mut current_folder_path,
+                &mut cached_folder_scan,
+            )? {
+                LoopControl::Continue => continue 'outer,
+                LoopControl::Break => break 'outer,
             }
-            continue 'outer; 
+            // The continue 'outer or break 'outer handles the flow,
+            // so no additional continue 'outer is needed here.
         }
 
         // Optimize pick_count calculation using a HashMap
@@ -215,18 +256,24 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             .into_iter()
             .map(|path| {
                 let path_str = path.to_string_lossy();
-                let pick_count = history_pick_counts.get(path_str.as_ref()).copied().unwrap_or(0);
+                let pick_count = history_pick_counts
+                    .get(path_str.as_ref())
+                    .copied()
+                    .unwrap_or(0);
                 VideoEntry::new(path, pick_count)
             })
             .collect();
 
-        if video_entries.is_empty() { // Should be caught by video_files_paths.is_empty(), but as a safeguard
-            println!("No video entries could be created (this shouldn't happen if files were found).");
+        if video_entries.is_empty() {
+            // Should be caught by video_files_paths.is_empty(), but as a safeguard
+            println!(
+                "No video entries could be created (this shouldn't happen if files were found)."
+            );
+            eprintln!("Warning: video_files_paths was not empty, but video_entries is empty. Investigate.");
             current_folder_path = None;
             cached_folder_scan = None;
-            continue 'outer; 
+            continue 'outer;
         }
-
 
         let selected_video_entry = video_entries
             .choose_weighted(&mut rand::rng(), |item| item.weight())?
@@ -349,13 +396,13 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                 Some("Pick another from this folder") => {
                     // current_folder_path is already set to the current folder.
                     // The cache will be used if it matches.
-                    break 'inner; 
+                    break 'inner;
                 }
                 Some("Rescan current folder") => {
                     if let Some(path_to_rescan) = &current_folder_path {
-                         println!("Rescanning folder '{}'...", path_to_rescan.display());
+                        println!("Rescanning folder '{}'...", path_to_rescan.display());
                         // Invalidate cache for this specific folder to force a fresh scan
-                        cached_folder_scan = None; 
+                        cached_folder_scan = None;
                         // current_folder_path remains the same.
                         // The next iteration of 'outer loop will call find_video_files
                         // because cached_folder_scan is None or its path won't match.
@@ -365,12 +412,12 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                         println!("No current folder to rescan.");
                         // This state should ideally not be reached if this option is offered.
                     }
-                    break 'inner; 
+                    break 'inner;
                 }
                 Some("Choose a different folder") => {
                     current_folder_path = None; // Clear folder to prompt for new one.
-                    cached_folder_scan = None;  // Clear cache as folder will change.
-                    break 'inner; 
+                    cached_folder_scan = None; // Clear cache as folder will change.
+                    break 'inner;
                 }
                 Some("View history") => {
                     view_history(&history, &theme)?;
@@ -385,8 +432,8 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                     return Ok(());
                 }
             }
-        } 
-    } 
+        }
+    }
 
     if let Some(server_handle_to_stop) = actix_server_main_handle.take() {
         server_handle_to_stop.stop(true).await;
