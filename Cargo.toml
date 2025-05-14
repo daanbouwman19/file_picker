@@ -16,6 +16,7 @@ shellexpand = "3.1"
 opener = "0.7.2"
 ffprobe = "0.4.0"
 dotenvy = "0.15"
+open = "5.0"
 
 # --- Added for Streaming ---
 actix-web = "4.11.0"
