@@ -53,8 +53,9 @@ fn play_video_locally(video_path: &Path) -> Result<(), Box<dyn std::error::Error
             Ok(())
         }
         Err(e) => Err(format!(
-            "Failed to open video locally with system handler for '{}': {}",
+            "Failed to open video locally with system handler for '{}': {}\nUnderlying error: {}",
             video_path.display(),
+            e,
             e
         )
         .into()),
@@ -101,30 +102,41 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         // Proceed with server setup only if a local IP was successfully obtained.
         if !local_ip_addr.is_empty() {
             stream_url_base = Some(format!("http://{}:{}", local_ip_addr, STREAMING_PORT));
-            
+
             // Create the shared state for the streaming server.
             let state_for_server_instance = Arc::new(Mutex::new(None::<PathBuf>));
             stream_state_arc = Some(state_for_server_instance.clone()); // Keep a reference to update the path later.
 
             // Prepare the application state for Actix.
             let app_state_for_server_config = web::Data::new(state_for_server_instance);
-            
+
             // Attempt to run the server.
-            match run_server(local_ip_addr.clone(), STREAMING_PORT, app_state_for_server_config) {
+            match run_server(
+                local_ip_addr.clone(),
+                STREAMING_PORT,
+                app_state_for_server_config,
+            ) {
                 Ok(server) => {
                     actix_server_main_handle = Some(server.handle()); // Store the server handle for graceful shutdown.
                     tokio::spawn(server); // Run the server in a separate Tokio task.
-                    println!("Streaming server is running at {}:{}", local_ip_addr, STREAMING_PORT);
+                    println!(
+                        "Streaming server is running at {}:{}",
+                        local_ip_addr, STREAMING_PORT
+                    );
                 }
                 Err(e) => {
-                    eprintln!("Failed to start streaming server: {}. Streaming will be disabled.", e);
+                    eprintln!(
+                        "Failed to start streaming server: {}. Streaming will be disabled.",
+                        e
+                    );
                     // Reset streaming-related variables if server startup fails.
                     stream_state_arc = None;
                     stream_url_base = None;
                 }
             }
-        } else if !cli_args.no_streaming { // Explicitly inform if IP was the issue but --no-streaming wasn't used.
-             println!("Streaming disabled: Could not determine local IP address.");
+        } else if !cli_args.no_streaming {
+            // Explicitly inform if IP was the issue but --no-streaming wasn't used.
+            println!("Streaming disabled: Could not determine local IP address.");
         }
     } else {
         println!("Streaming server is disabled via the --no-streaming flag.");
@@ -147,7 +159,8 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         let folder_path = match current_folder_path.clone() {
             Some(path) => path,
             None => PathBuf::from(
-                shellexpand::full( // Expand environment variables and `~`.
+                shellexpand::full(
+                    // Expand environment variables and `~`.
                     &Input::<String>::with_theme(&theme)
                         .with_prompt("Enter the path to the video folder (supports ~ and env vars)")
                         .interact_text()?,
@@ -229,11 +242,14 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             let mut current_video_streaming_url: Option<String> = None;
 
             // Dynamically add streaming-related actions if the server is running.
-            if let Some(state_arc_ref) = &stream_state_arc { // Check if streaming server was intended to start.
-                if let Some(base_url_ref) = &stream_url_base { // Check if base URL was successfully formed.
+            if let Some(state_arc_ref) = &stream_state_arc {
+                // Check if streaming server was intended to start.
+                if let Some(base_url_ref) = &stream_url_base {
+                    // Check if base URL was successfully formed.
                     let mut is_current_video_set_for_streaming = false;
                     // Check if the *current* selected video is already set for streaming.
-                    if let Ok(guard) = state_arc_ref.lock() { // Lock the Mutex to access the shared path.
+                    if let Ok(guard) = state_arc_ref.lock() {
+                        // Lock the Mutex to access the shared path.
                         if let Some(streaming_path) = &*guard {
                             if streaming_path == &selected_file {
                                 is_current_video_set_for_streaming = true;
@@ -250,7 +266,7 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
-            
+
             // Add common actions.
             actions.extend(vec![
                 "Pick another from this folder",
@@ -263,18 +279,22 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                 "Selected: '{}'. What next?",
                 selected_file.file_name().map_or_else(
                     || selected_file.to_string_lossy(), // Fallback to full path if no filename.
-                    |name| name.to_string_lossy()      // Use filename if available.
+                    |name| name.to_string_lossy()       // Use filename if available.
                 )
             );
-            
+
             let choice_idx = Select::with_theme(&theme)
                 .with_prompt(&choice_prompt)
                 .items(&actions)
                 .default(0) // Default to "Play locally".
                 .interact_opt()?
                 // If Esc is pressed, default to the "Quit" option.
-                .unwrap_or_else(|| actions.iter().position(|a| *a == "Quit").unwrap_or(actions.len() - 1));
-
+                .unwrap_or_else(|| {
+                    actions
+                        .iter()
+                        .position(|a| *a == "Quit")
+                        .unwrap_or(actions.len() - 1)
+                });
 
             // Handle the user's choice.
             // The `s` in `.map(|s| *s)` will be `&&str`, so `*s` dereferences it to `&str`.
@@ -286,15 +306,25 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                     // After attempting to play, stay in the inner loop to offer more actions for the same video.
                 }
                 Some("Stream this video") => {
-                    if let (Some(state_arc_ref_update), Some(base_url_ref_display)) = (&stream_state_arc, &stream_url_base) {
-                        { // Lock scope for updating the shared state.
+                    if let (Some(state_arc_ref_update), Some(base_url_ref_display)) =
+                        (&stream_state_arc, &stream_url_base)
+                    {
+                        {
+                            // Lock scope for updating the shared state.
                             let mut guard = state_arc_ref_update.lock().unwrap();
                             *guard = Some(selected_file.clone()); // Set the current video for streaming.
                         }
                         let full_stream_url = format!("{}/stream", base_url_ref_display);
-                        println!("Streaming URL for '{}': {}", selected_file.display(), full_stream_url);
+                        println!(
+                            "Streaming URL for '{}': {}",
+                            selected_file.display(),
+                            full_stream_url
+                        );
                         if let Ok(code) = QrCode::new(full_stream_url.as_bytes()) {
-                            println!("Scan QR code to stream on another device:\n{}", code.render::<unicode::Dense1x2>().build());
+                            println!(
+                                "Scan QR code to stream on another device:\n{}",
+                                code.render::<unicode::Dense1x2>().build()
+                            );
                         }
                     } else {
                         println!("Streaming is not available or was not enabled for this session.");
@@ -303,8 +333,11 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                 Some("Get Streaming Link (current video)") => {
                     if let Some(url) = &current_video_streaming_url {
                         println!("Streaming URL for '{}': {}", selected_file.display(), url);
-                         if let Ok(code) = QrCode::new(url.as_bytes()) {
-                            println!("Scan QR code to stream on another device:\n{}", code.render::<unicode::Dense1x2>().build());
+                        if let Ok(code) = QrCode::new(url.as_bytes()) {
+                            println!(
+                                "Scan QR code to stream on another device:\n{}",
+                                code.render::<unicode::Dense1x2>().build()
+                            );
                         }
                     } else {
                         // This case should ideally not be reached if UI logic is correct.
@@ -323,14 +356,14 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                     view_history(&history, &theme)?;
                     // Stay in inner loop for the same video after viewing history.
                 }
-                    if let Some(server_handle_to_stop) = actix_server_main_handle.take() { // Use .take() to avoid multiple stop calls.
+                Some("Quit") | Some(_) | None => {
+                    // Treat unknown action or Esc (None from interact_opt) as Quit.
+                    if let Some(server_handle_to_stop) = actix_server_main_handle.take() {
+                        // Use .take() to avoid multiple stop calls.
                         println!("\nStopping streaming server...");
                         // The stop method is async; await it.
-                        if let Err(e) = server_handle_to_stop.stop(true).await {
-                            eprintln!("Error stopping server: {}", e);
-                        }
+                        server_handle_to_stop.stop(true).await;
                         println!("Streaming server stopped.");
-                    }
                     }
                     println!("Goodbye!");
                     return Ok(()); // Exit the run_app function, terminating the program.
