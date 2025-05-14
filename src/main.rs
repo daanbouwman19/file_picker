@@ -257,8 +257,8 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
 
         // Validate that the path is a directory before attempting to scan
         if !folder_path_to_scan.is_dir() {
-            eprintln!(
-                "Error: The path '{}' is not a valid directory.",
+            log::error!(
+                "The path '{}' is not a valid directory.",
                 folder_path_to_scan.display()
             );
             current_folder_path = None; // Reset to re-prompt for folder
@@ -321,14 +321,14 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let video_entries: Vec<VideoEntry> = video_files_paths
-            .into_iter()
-            .map(|path| {
-                let path_str = path.to_string_lossy();
+            .iter() // Changed from into_iter() to keep video_files_paths available
+            .map(|path_ref| { // path_ref is &PathBuf
+                let path_str = path_ref.to_string_lossy();
                 let pick_count = history_pick_counts
                     .get(path_str.as_ref())
                     .copied()
                     .unwrap_or(0);
-                VideoEntry::new(path, pick_count)
+                VideoEntry::new(path_ref.clone(), pick_count) // Clone path_ref here
             })
             .collect();
 
@@ -340,9 +340,9 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             // but the process of converting them to VideoEntry items resulted in an empty list.
             // This is unexpected with the current 1:1 mapping logic.
             log::warn!(
-                "Internal inconsistency: Found video files, but no video entries could be created. \
-                This might indicate an issue with processing video file paths. \
-                The selection process will likely fail with 'No valid choice'."
+                "Internal inconsistency: Found video files, but no video entries could be created. video_files_paths: {:?}. \
+                This might indicate an issue with processing video file paths. The selection process will likely fail with 'No valid choice'.",
+                video_files_paths
             );
             // No need to 'continue' or 'break' here; .choose_weighted() below will return an Err
             // if video_entries is empty, which will be propagated by the '?' operator.
