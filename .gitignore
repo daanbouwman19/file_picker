@@ -1,0 +1,52 @@
+/target
+
+# Rust & Cargo
+# For libraries, it's common to ignore Cargo.lock.
+# For binaries/applications (like 'file_picker' likely is), it's usually better to commit Cargo.lock.
+# If you decide to ignore it, uncomment the line below:
+# Cargo.lock
+
+# Environment variables
+# Ignore local environment files
+.env
+*.env
+*.env.*
+# But not an example template, which is good to commit
+!.env.example
+!.env.sample
+
+# IDE-specific files and directories
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+nbproject/ # NetBeans
+*.sublime-project
+*.sublime-workspace
+
+# Editor temporary files
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# OS-generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+
+# Log files
+*.log
+logs/
+
+# Local tools directory
+# If you have a /tools/ directory (e.g., for ffprobe.exe) that contains
+# binaries downloaded locally and not meant to be version controlled, keep this.
+/tools/
