@@ -323,12 +323,14 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                     view_history(&history, &theme)?;
                     // Stay in inner loop for the same video after viewing history.
                 }
-                Some("Quit") | Some(_) | None => { // Treat unknown action or Esc (None from interact_opt) as Quit.
                     if let Some(server_handle_to_stop) = actix_server_main_handle.take() { // Use .take() to avoid multiple stop calls.
                         println!("\nStopping streaming server...");
                         // The stop method is async; await it.
-                        server_handle_to_stop.stop(true).await; 
+                        if let Err(e) = server_handle_to_stop.stop(true).await {
+                            eprintln!("Error stopping server: {}", e);
+                        }
                         println!("Streaming server stopped.");
+                    }
                     }
                     println!("Goodbye!");
                     return Ok(()); // Exit the run_app function, terminating the program.
