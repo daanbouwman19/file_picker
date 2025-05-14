@@ -163,7 +163,8 @@ async fn setup_streaming_server(
         }
     };
 
-    if local_ip_addr.is_empty() { // Should ideally not happen if local_ip() succeeded
+    if local_ip_addr.is_empty() {
+        // Should ideally not happen if local_ip() succeeded
         println!("Streaming disabled: Could not determine local IP address (got empty string).");
         return Ok(None);
     }
@@ -176,11 +177,21 @@ async fn setup_streaming_server(
         Ok(server) => {
             let server_handle = server.handle();
             tokio::spawn(server); // Spawn the server to run in the background
-            println!("Streaming server is running at {}:{}", local_ip_addr, STREAMING_PORT);
-            Ok(Some((server_handle, stream_state_instance, stream_url_base)))
+            println!(
+                "Streaming server is running at {}:{}",
+                local_ip_addr, STREAMING_PORT
+            );
+            Ok(Some((
+                server_handle,
+                stream_state_instance,
+                stream_url_base,
+            )))
         }
         Err(e) => {
-            eprintln!("Failed to start streaming server: {}. Streaming will be disabled.", e);
+            log::error!(
+                "Failed to start streaming server: {}. Streaming will be disabled.",
+                e
+            );
             Ok(None)
         }
     }
@@ -244,6 +255,15 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
+        // Validate that the path is a directory before attempting to scan
+        if !folder_path_to_scan.is_dir() {
+            eprintln!(
+                "Error: The path '{}' is not a valid directory.",
+                folder_path_to_scan.display()
+            );
+            current_folder_path = None; // Reset to re-prompt for folder
+            continue 'outer; // Skip scanning and go back to the start of the loop
+        }
         // Use cached scan if available and folder matches, otherwise scan
         let video_files_paths = match &cached_folder_scan {
             Some((cached_path, files)) if *cached_path == folder_path_to_scan => {
@@ -312,10 +332,21 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             })
             .collect();
 
-        // At this point, if video_files_paths was not empty, video_entries should also not be empty
-        // due to the 1:1 mapping in the .map() call above. The video_files_paths.is_empty()
-        // check handles the "no videos found" scenario. If video_entries were unexpectedly empty
-        // here, .choose_weighted() below would return an error.
+        // Verification: If video_files_paths was not empty (checked earlier),
+        // video_entries should also not be empty after the mapping.
+        // If it is empty, it's an unexpected state.
+        if video_entries.is_empty() {
+            // This implies that the initial video_files_paths list was not empty,
+            // but the process of converting them to VideoEntry items resulted in an empty list.
+            // This is unexpected with the current 1:1 mapping logic.
+            log::warn!(
+                "Internal inconsistency: Found video files, but no video entries could be created. \
+                This might indicate an issue with processing video file paths. \
+                The selection process will likely fail with 'No valid choice'."
+            );
+            // No need to 'continue' or 'break' here; .choose_weighted() below will return an Err
+            // if video_entries is empty, which will be propagated by the '?' operator.
+        }
 
         let selected_video_entry = video_entries
             .choose_weighted(&mut rand::rng(), |item| item.weight())?
