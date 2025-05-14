@@ -17,6 +17,7 @@ opener = "0.7.2"
 ffprobe = "0.4.0"
 dotenvy = "0.15"
 open = "5.0"
+env_logger = "0.11.8"
 
 # --- Added for Streaming ---
 actix-web = "4.11.0"
@@ -29,4 +30,4 @@ futures-util = { version = "0.3.31", default-features = false, features = ["std"
 
 # --- Added for QR Code ---
 qrcode = { version = "0.14.1" } # Added QR code crate
-
+log = "0.4.27"
