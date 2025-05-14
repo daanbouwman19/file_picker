@@ -98,8 +98,8 @@ async fn main() {
 /// `Err` if any `dialoguer` interaction fails.
 fn handle_no_videos_found_action(
     folder_path_display: &str, // Pass as &str to avoid cloning PathBuf just for display
-    theme: &ColorfulTheme, // Pass as &str for efficient display within the function.
-    history: &[HistoryEntry], // Pass history as a slice
+    theme: &ColorfulTheme,     // Pass as &str for efficient display within the function.
+    history: &[HistoryEntry],  // Pass history as a slice
     current_folder_path: &mut Option<PathBuf>,
     cached_folder_scan: &mut Option<(PathBuf, Vec<PathBuf>)>,
 ) -> Result<LoopControl, Box<dyn std::error::Error>> {
@@ -165,7 +165,9 @@ async fn setup_streaming_server(
 
     if local_ip_addr.is_empty() {
         // Should ideally not happen if local_ip() succeeded
-        println!("Streaming disabled: Could not determine local IP address (got empty string).");
+        log::error!(
+            "Streaming disabled: local_ip() returned Ok, but the resulting IP address string was empty. This is unexpected."
+        );
         return Ok(None);
     }
 
@@ -257,12 +259,25 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
 
         // Validate that the path is a directory before attempting to scan
         if !folder_path_to_scan.is_dir() {
-            log::error!(
+            eprintln!(
                 "The path '{}' is not a valid directory.",
                 folder_path_to_scan.display()
             );
             current_folder_path = None; // Reset to re-prompt for folder
             continue 'outer; // Skip scanning and go back to the start of the loop
+        } else {
+            // Check if we can read the directory (implies read permissions)
+            if let Err(e) = std::fs::read_dir(&folder_path_to_scan) {
+                eprintln!(
+                    "Error: Cannot access directory '{}'. Please check permissions. (Details: {})",
+                    folder_path_to_scan.display(),
+                    e
+                );
+                log::error!("Failed to read directory '{}': {}", folder_path_to_scan.display(), e);
+                current_folder_path = None; // Reset to re-prompt for folder
+                cached_folder_scan = None; // Clear cache as we couldn't access this folder
+                continue 'outer;
+            }
         }
         // Use cached scan if available and folder matches, otherwise scan
         let video_files_paths = match &cached_folder_scan {
@@ -482,8 +497,11 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                         // because cached_folder_scan is None or its path won't match.
                         // Actually, we need to ensure the *next* scan is forced for *this* folder.
                         // Setting cached_folder_scan to None is enough, the outer loop will handle it.
-                    } else {
-                        println!("No current folder to rescan.");
+                    } else { // This else block should ideally not be reached if the option is offered.
+                        log::error!(
+                            "Internal inconsistency: 'Rescan current folder' option was selected, \
+                            but current_folder_path is None."
+                        );
                         // This state should ideally not be reached if this option is offered.
                     }
                     break 'inner;
