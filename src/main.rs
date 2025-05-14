@@ -322,7 +322,8 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
 
         let video_entries: Vec<VideoEntry> = video_files_paths
             .iter() // Changed from into_iter() to keep video_files_paths available
-            .map(|path_ref| { // path_ref is &PathBuf
+            .map(|path_ref| {
+                // path_ref is &PathBuf
                 let path_str = path_ref.to_string_lossy();
                 let pick_count = history_pick_counts
                     .get(path_str.as_ref())
@@ -339,7 +340,7 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             // This implies that the initial video_files_paths list was not empty,
             // but the process of converting them to VideoEntry items resulted in an empty list.
             // This is unexpected with the current 1:1 mapping logic.
-            log::warn!(
+            log::error!(
                 "Internal inconsistency: Found video files, but no video entries could be created. video_files_paths: {:?}. \
                 This might indicate an issue with processing video file paths. The selection process will likely fail with 'No valid choice'.",
                 video_files_paths
