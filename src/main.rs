@@ -87,7 +87,7 @@ async fn main() {
 /// # Arguments
 ///
 /// * `folder_path_display` - A string slice representing the path of the folder where no videos were found, for display purposes.
-/// * `theme` - The `ColorfulTheme` for `dialoguer` prompts.
+/// * `theme` - The `ColorfulTheme` for `dialoguer` prompts. Passed as `&str` for efficient display within the function.
 /// * `history` - A slice of `HistoryEntry` to be passed to `view_history` if selected.
 /// * `current_folder_path` - A mutable reference to `Option<PathBuf>`, potentially set to `None` if the user chooses to select a new folder.
 /// * `cached_folder_scan` - A mutable reference to the folder scan cache, potentially set to `None`.
@@ -98,7 +98,7 @@ async fn main() {
 /// `Err` if any `dialoguer` interaction fails.
 fn handle_no_videos_found_action(
     folder_path_display: &str, // Pass as &str to avoid cloning PathBuf just for display
-    theme: &ColorfulTheme,
+    theme: &ColorfulTheme, // Pass as &str for efficient display within the function.
     history: &[HistoryEntry], // Pass history as a slice
     current_folder_path: &mut Option<PathBuf>,
     cached_folder_scan: &mut Option<(PathBuf, Vec<PathBuf>)>,
