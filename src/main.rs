@@ -34,7 +34,16 @@ use crate::video_entry::VideoEntry;
 
 const STREAMING_PORT: u16 = 8080;
 
-/// Attempts to open the given video file path with the system's default application.
+/// Attempts to open a video file with the system's default media player.
+///
+/// # Arguments
+///
+/// * `video_path` - A `Path` to the video file to be opened.
+///
+/// # Returns
+///
+/// `Ok(())` if the attempt to open the file was successful (note: this doesn't guarantee the player launched correctly, only that the OS command was issued).
+/// `Err` with a descriptive error message if `open::that` fails.
 fn play_video_locally(video_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     match open::that(video_path) {
         Ok(_) => {
@@ -68,7 +77,25 @@ async fn main() {
     }
 }
 
-// Helper function to handle the scenario where no video files are found in a folder.
+/// Handles the user interaction flow when no video files are found in the scanned directory.
+///
+/// It prompts the user to choose an action:
+/// - Choose another folder: Resets `current_folder_path` and `cached_folder_scan`.
+/// - View history: Displays the video history.
+/// - Quit: Signals to break the main application loop.
+///
+/// # Arguments
+///
+/// * `folder_path_display` - A string slice representing the path of the folder where no videos were found, for display purposes.
+/// * `theme` - The `ColorfulTheme` for `dialoguer` prompts.
+/// * `history` - A slice of `HistoryEntry` to be passed to `view_history` if selected.
+/// * `current_folder_path` - A mutable reference to `Option<PathBuf>`, potentially set to `None` if the user chooses to select a new folder.
+/// * `cached_folder_scan` - A mutable reference to the folder scan cache, potentially set to `None`.
+///
+/// # Returns
+///
+/// `Ok(LoopControl)` indicating whether the main loop should `Continue` or `Break`.
+/// `Err` if any `dialoguer` interaction fails.
 fn handle_no_videos_found_action(
     folder_path_display: &str, // Pass as &str to avoid cloning PathBuf just for display
     theme: &ColorfulTheme,
@@ -105,62 +132,83 @@ fn handle_no_videos_found_action(
     }
 }
 
+/// Sets up and starts the Actix web server for streaming if not disabled.
+///
+/// # Arguments
+///
+/// * `no_streaming_flag` - Boolean indicating if streaming is explicitly disabled via CLI.
+///
+/// # Returns
+///
+/// `Ok(Some((ServerHandle, StreamState, String)))` containing the server handle,
+/// shared stream state, and base URL if the server starts successfully.
+/// `Ok(None)` if streaming is disabled (by flag, IP error, or server start error).
+/// `Err` if an unexpected error occurs (though most errors are handled and result in `Ok(None)`).
+async fn setup_streaming_server(
+    no_streaming_flag: bool,
+) -> Result<Option<(ServerHandle, StreamState, String)>, Box<dyn std::error::Error>> {
+    if no_streaming_flag {
+        println!("Streaming server is disabled via the --no-streaming flag.");
+        return Ok(None);
+    }
+
+    let local_ip_addr = match local_ip() {
+        Ok(ip) => ip.to_string(),
+        Err(e) => {
+            log::warn!(
+                "Could not get local IP address for streaming: {}. Streaming will be disabled.",
+                e
+            );
+            return Ok(None);
+        }
+    };
+
+    if local_ip_addr.is_empty() { // Should ideally not happen if local_ip() succeeded
+        println!("Streaming disabled: Could not determine local IP address (got empty string).");
+        return Ok(None);
+    }
+
+    let stream_url_base = format!("http://{}:{}", local_ip_addr, STREAMING_PORT);
+    let stream_state_instance = Arc::new(Mutex::new(None::<PathBuf>));
+    let app_state_for_server = web::Data::new(stream_state_instance.clone());
+
+    match run_server(local_ip_addr.clone(), STREAMING_PORT, app_state_for_server) {
+        Ok(server) => {
+            let server_handle = server.handle();
+            tokio::spawn(server); // Spawn the server to run in the background
+            println!("Streaming server is running at {}:{}", local_ip_addr, STREAMING_PORT);
+            Ok(Some((server_handle, stream_state_instance, stream_url_base)))
+        }
+        Err(e) => {
+            eprintln!("Failed to start streaming server: {}. Streaming will be disabled.", e);
+            Ok(None)
+        }
+    }
+}
+
+/// Main application logic.
+///
+/// This function orchestrates the entire application flow:
+/// - Initializes environment, logger, and parses command-line arguments.
+/// - Loads history and sets up the streaming server (if enabled).
+/// - Enters a loop to prompt for folders, scan for videos, pick a video, and offer actions.
+/// - Handles user interactions for playing, streaming, re-picking, changing folders, viewing history, and quitting.
 async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
     dotenvy::dotenv().ok();
+    env_logger::init(); // Initialize logger for log::warn! and other log levels.
     let cli_args = Cli::parse();
     let theme = ColorfulTheme::default();
     let mut history: Vec<HistoryEntry> = load_history()?;
 
-    let mut actix_server_main_handle: Option<ServerHandle> = None;
-    let mut stream_state_arc: Option<StreamState> = None;
-    let mut stream_url_base: Option<String> = None;
+    // Setup streaming server
+    let streaming_components = setup_streaming_server(cli_args.no_streaming).await?;
 
-    if !cli_args.no_streaming {
-        let local_ip_addr = match local_ip() {
-            Ok(ip) => ip.to_string(),
-            Err(e) => {
-                eprintln!(
-                    "Warning: Could not get local IP address for streaming: {}. Streaming will be disabled.",
-                    e
-                );
-                String::new()
-            }
+    // Destructure the components if streaming is enabled, otherwise they'll be None
+    let (mut actix_server_main_handle, stream_state_arc, stream_url_base) =
+        match streaming_components {
+            Some((handle, state, url_base)) => (Some(handle), Some(state), Some(url_base)),
+            None => (None, None, None),
         };
-
-        if !local_ip_addr.is_empty() {
-            stream_url_base = Some(format!("http://{}:{}", local_ip_addr, STREAMING_PORT));
-            let state_for_server_instance = Arc::new(Mutex::new(None::<PathBuf>));
-            stream_state_arc = Some(state_for_server_instance.clone());
-            let app_state_for_server_config = web::Data::new(state_for_server_instance);
-
-            match run_server(
-                local_ip_addr.clone(),
-                STREAMING_PORT,
-                app_state_for_server_config,
-            ) {
-                Ok(server) => {
-                    actix_server_main_handle = Some(server.handle());
-                    tokio::spawn(server);
-                    println!(
-                        "Streaming server is running at {}:{}",
-                        local_ip_addr, STREAMING_PORT
-                    );
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Failed to start streaming server: {}. Streaming will be disabled.",
-                        e
-                    );
-                    stream_state_arc = None;
-                    stream_url_base = None;
-                }
-            }
-        } else if !cli_args.no_streaming {
-            println!("Streaming disabled: Could not determine local IP address.");
-        }
-    } else {
-        println!("Streaming server is disabled via the --no-streaming flag.");
-    }
 
     let mut current_folder_path: Option<PathBuf> = cli_args
         .folder
@@ -264,16 +312,10 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
             })
             .collect();
 
-        if video_entries.is_empty() {
-            // Should be caught by video_files_paths.is_empty(), but as a safeguard
-            println!(
-                "No video entries could be created (this shouldn't happen if files were found)."
-            );
-            eprintln!("Warning: video_files_paths was not empty, but video_entries is empty. Investigate.");
-            current_folder_path = None;
-            cached_folder_scan = None;
-            continue 'outer;
-        }
+        // At this point, if video_files_paths was not empty, video_entries should also not be empty
+        // due to the 1:1 mapping in the .map() call above. The video_files_paths.is_empty()
+        // check handles the "no videos found" scenario. If video_entries were unexpectedly empty
+        // here, .choose_weighted() below would return an error.
 
         let selected_video_entry = video_entries
             .choose_weighted(&mut rand::rng(), |item| item.weight())?
