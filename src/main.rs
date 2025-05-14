@@ -9,6 +9,7 @@ use qrcode::QrCode;
 use rand::prelude::*;
 use std::collections::HashMap;
 use std::env;
+use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::{Arc, Mutex};
@@ -69,6 +70,24 @@ enum PostActionOutcome {
     ChooseDifferentFolder,
     QuitApplication,
 }
+
+// Custom application error type
+#[derive(Debug)]
+enum AppError {
+    NoVideoEntriesAvailable,
+    // Add other app-specific errors here as needed
+}
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AppError::NoVideoEntriesAvailable => {
+                write!(f, "No video entries could be prepared for selection, even if video files were found.")
+            }
+        }
+    }
+}
+impl std::error::Error for AppError {}
 
 #[tokio::main]
 async fn main() {
@@ -332,8 +351,8 @@ fn select_video_logic(
         // This could be a custom error or a standard one like NotFound.
         return Err(Box::new(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            "No video entries available for selection.",
-        )));
+            AppError::NoVideoEntriesAvailable.to_string(),
+        ))); // Return our custom error, boxed
     }
 
     // Perform weighted random selection
@@ -504,10 +523,14 @@ async fn loop_user_actions(
 }
 
 /// Stops the streaming server if it's running.
+/// Includes a timeout to prevent the application from hanging.
 async fn shutdown_streaming_server_logic(server_handle: ServerHandle) {
     println!("\nStopping streaming server...");
-    server_handle.stop(true).await; // Graceful stop
-    println!("Streaming server stopped.");
+    // Graceful stop with a timeout
+    match tokio::time::timeout(std::time::Duration::from_secs(10), server_handle.stop(true)).await {
+        Ok(_) => println!("Streaming server stopped."),
+        Err(_) => eprintln!("Streaming server stop timed out!"),
+    }
 }
 
 /// Main application logic, orchestrating the video picking process.
@@ -596,7 +619,7 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
                     e,
                     video_files_paths.len()
                 );
-                eprintln!("Could not select a video. The list might be empty or an internal error occurred.");
+                eprintln!("Could not select a video: {}", e);
                 // To recover, try prompting for a folder again.
                 current_folder_path_opt = None;
                 cached_folder_scan = None;
