@@ -195,7 +195,7 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
             output.status, stderr
         );
         return Err(Box::new(FfprobeError::new(
-            format!("ffprobe failed (status: {}): {}", output.status, stderr.trim()),
+            format!("command failed (status: {}): {}", output.status, stderr.trim()),
         )));
     }
 
@@ -203,10 +203,10 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
     let json_str = String::from_utf8_lossy(&output.stdout);
     let parsed_data: FfprobeOutput = serde_json::from_str(&json_str).map_err(|e| {
         eprintln!(
-            "Failed to parse ffprobe JSON output: {}. Raw output:\n---\n{}\n---",
+            "Failed to parse JSON output: {}. Raw output:\n---\n{}\n---",
             e, json_str
         );
-        FfprobeError::with_source("Failed to parse ffprobe JSON output".to_string(), e)
+        FfprobeError::with_source("failed to parse JSON output".to_string(), e)
     })?;
 
     // --- Extract Metadata ---
