@@ -14,11 +14,27 @@ use std::{
 #[derive(Debug)]
 pub struct FfprobeError {
     message: String,
+    source: Option<Box<dyn std::error::Error + 'static>>,
 }
 
 impl FfprobeError {
+    /// Creates a new FfprobeError with just a message.
     pub fn new(message: String) -> Self {
-        Self { message }
+        Self { 
+            message,
+            source: None,
+        }
+    }
+
+    /// Creates a new FfprobeError with a message and source error.
+    pub fn with_source<E>(message: String, source: E) -> Self 
+    where
+        E: std::error::Error + 'static,
+    {
+        Self {
+            message,
+            source: Some(Box::new(source)),
+        }
     }
 }
 
@@ -28,7 +44,11 @@ impl fmt::Display for FfprobeError {
     }
 }
 
-impl std::error::Error for FfprobeError {}
+impl std::error::Error for FfprobeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.as_ref().map(|e| e.as_ref())
+    }
+}
 
 /// Stores extracted metadata for a video file, such as resolution and duration.
 #[derive(Debug, Clone, Default)]
@@ -186,7 +206,7 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
             "Failed to parse ffprobe JSON output: {}. Raw output:\n---\n{}\n---",
             e, json_str
         );
-        FfprobeError::new(format!("Failed to parse ffprobe JSON: {}", e))
+        FfprobeError::with_source("Failed to parse ffprobe JSON output".to_string(), e)
     })?;
 
     // --- Extract Metadata ---
