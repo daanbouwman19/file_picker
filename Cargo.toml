@@ -4,30 +4,30 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 dialoguer = "0.11"
-rand = "0.9.1"
+rand = "0.9"
 walkdir = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
 shellexpand = "3.1"
-opener = "0.7.2"
+opener = "0.8"
 ffprobe = "0.4.0"
 dotenvy = "0.15"
 open = "5.0"
-env_logger = "0.11.8"
+env_logger = "0.11"
 
 # --- Added for Streaming ---
 actix-web = "4.11.0"
 actix-files = "0.6.6"
-tokio = { version = "1.45.0", features = ["full"] } # Use full features for simplicity
+tokio = { version = "1.47", features = ["full"] } # Use full features for simplicity
 local-ip-address = "0.6.1"
-mime_guess = "2.0.5" # To guess the video's MIME type
-async-stream = "0.3.5" # Added dependency for stream macro
-futures-util = { version = "0.3.31", default-features = false, features = ["std"] }
+mime_guess = "2.0" # To guess the video's MIME type
+async-stream = "0.3" # Added dependency for stream macro
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 # --- Added for QR Code ---
-qrcode = { version = "0.14.1" } # Added QR code crate
-log = "0.4.27"
+qrcode = { version = "0.14" } # Added QR code crate
+log = "0.4"
