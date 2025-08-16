@@ -357,7 +357,8 @@ fn select_video_logic(
 
     // Perform weighted random selection
     video_entries
-        .choose_weighted(&mut rand::rng(), |item| item.weight()).cloned() // Clone the selected entry
+        .choose_weighted(&mut rand::rng(), |item| item.weight())
+        .cloned()
         .map_err(|e| {
             log::error!(
                 "Error during weighted choice: {:?}. Video entries count: {}",
