@@ -4,10 +4,55 @@ use crate::config::FFPROBE_EXECUTABLE_NAME;
 use serde::Deserialize;
 use std::{
     env,
-    io::{Error as IoError, ErrorKind as IoErrorKind},
+    fmt,
+    io::Error as IoError,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+
+/// Custom error type for ffprobe command execution failures.
+#[derive(Debug)]
+pub struct FfprobeError {
+    message: String,
+    source: Option<Box<dyn std::error::Error + 'static>>,
+}
+
+impl FfprobeError {
+    /// Creates a new FfprobeError with just a message.
+    pub fn new<S>(message: S) -> Self 
+    where
+        S: Into<String>,
+    {
+        Self { 
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    /// Creates a new FfprobeError with a message and source error.
+    pub fn with_source<S, E>(message: S, source: E) -> Self 
+    where
+        S: Into<String>,
+        E: std::error::Error + 'static,
+    {
+        Self {
+            message: message.into(),
+            source: Some(Box::new(source)),
+        }
+    }
+}
+
+impl fmt::Display for FfprobeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ffprobe error: {}", self.message)
+    }
+}
+
+impl std::error::Error for FfprobeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.as_deref()
+    }
+}
 
 /// Stores extracted metadata for a video file, such as resolution and duration.
 #[derive(Debug, Clone, Default)]
@@ -153,9 +198,8 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
             "ffprobe command failed (status: {}). Stderr: {}",
             output.status, stderr
         );
-        return Err(Box::new(IoError::new(
-            IoErrorKind::Other,
-            format!("ffprobe failed: {}", stderr.trim()),
+        return Err(Box::new(FfprobeError::new(
+            format!("command failed (status: {}): {}", output.status, stderr.trim()),
         )));
     }
 
@@ -163,13 +207,10 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
     let json_str = String::from_utf8_lossy(&output.stdout);
     let parsed_data: FfprobeOutput = serde_json::from_str(&json_str).map_err(|e| {
         eprintln!(
-            "Failed to parse ffprobe JSON output: {}. Raw output:\n---\n{}\n---",
+            "Failed to parse JSON output: {}. Raw output:\n---\n{}\n---",
             e, json_str
         );
-        IoError::new(
-            IoErrorKind::InvalidData,
-            format!("Failed to parse ffprobe JSON: {}", e),
-        )
+        FfprobeError::with_source("failed to parse JSON output", e)
     })?;
 
     // --- Extract Metadata ---
