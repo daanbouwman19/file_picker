@@ -4,10 +4,31 @@ use crate::config::FFPROBE_EXECUTABLE_NAME;
 use serde::Deserialize;
 use std::{
     env,
-    io::{Error as IoError, ErrorKind as IoErrorKind},
+    fmt,
+    io::Error as IoError,
     path::{Path, PathBuf},
     process::{Command, Stdio},
 };
+
+/// Custom error type for ffprobe command execution failures.
+#[derive(Debug)]
+pub struct FfprobeError {
+    message: String,
+}
+
+impl FfprobeError {
+    pub fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl fmt::Display for FfprobeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ffprobe error: {}", self.message)
+    }
+}
+
+impl std::error::Error for FfprobeError {}
 
 /// Stores extracted metadata for a video file, such as resolution and duration.
 #[derive(Debug, Clone, Default)]
@@ -153,7 +174,7 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
             "ffprobe command failed (status: {}). Stderr: {}",
             output.status, stderr
         );
-        return Err(Box::new(IoError::other(
+        return Err(Box::new(FfprobeError::new(
             format!("ffprobe failed (status: {}): {}", output.status, stderr.trim()),
         )));
     }
@@ -165,10 +186,7 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
             "Failed to parse ffprobe JSON output: {}. Raw output:\n---\n{}\n---",
             e, json_str
         );
-        IoError::new(
-            IoErrorKind::InvalidData,
-            format!("Failed to parse ffprobe JSON: {}", e),
-        )
+        FfprobeError::new(format!("Failed to parse ffprobe JSON: {}", e))
     })?;
 
     // --- Extract Metadata ---
