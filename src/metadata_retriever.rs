@@ -19,20 +19,24 @@ pub struct FfprobeError {
 
 impl FfprobeError {
     /// Creates a new FfprobeError with just a message.
-    pub fn new(message: String) -> Self {
+    pub fn new<S>(message: S) -> Self 
+    where
+        S: Into<String>,
+    {
         Self { 
-            message,
+            message: message.into(),
             source: None,
         }
     }
 
     /// Creates a new FfprobeError with a message and source error.
-    pub fn with_source<E>(message: String, source: E) -> Self 
+    pub fn with_source<S, E>(message: S, source: E) -> Self 
     where
+        S: Into<String>,
         E: std::error::Error + 'static,
     {
         Self {
-            message,
+            message: message.into(),
             source: Some(Box::new(source)),
         }
     }
@@ -46,7 +50,7 @@ impl fmt::Display for FfprobeError {
 
 impl std::error::Error for FfprobeError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.source.as_ref().map(|e| e.as_ref())
+        self.source.as_deref()
     }
 }
 
@@ -206,7 +210,7 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
             "Failed to parse JSON output: {}. Raw output:\n---\n{}\n---",
             e, json_str
         );
-        FfprobeError::with_source("failed to parse JSON output".to_string(), e)
+        FfprobeError::with_source("failed to parse JSON output", e)
     })?;
 
     // --- Extract Metadata ---
