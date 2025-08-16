@@ -154,7 +154,7 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
             output.status, stderr
         );
         return Err(Box::new(IoError::other(
-            format!("ffprobe failed: {}", stderr.trim()),
+            format!("ffprobe failed (status: {}): {}", output.status, stderr.trim()),
         )));
     }
 
