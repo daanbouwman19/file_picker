@@ -39,3 +39,20 @@ impl VideoEntry {
         1.0 / (self.pick_count as f64 + 1.0)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_weight_calculation() {
+        let entry_0 = VideoEntry::new(PathBuf::from("video1.mp4"), 0);
+        assert!((entry_0.weight() - 1.0).abs() < f64::EPSILON);
+
+        let entry_1 = VideoEntry::new(PathBuf::from("video2.mp4"), 1);
+        assert!((entry_1.weight() - 0.5).abs() < f64::EPSILON);
+
+        let entry_3 = VideoEntry::new(PathBuf::from("video3.mp4"), 3);
+        assert!((entry_3.weight() - 0.25).abs() < f64::EPSILON);
+    }
+}

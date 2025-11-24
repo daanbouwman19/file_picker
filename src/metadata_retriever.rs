@@ -55,7 +55,7 @@ impl std::error::Error for FfprobeError {
 }
 
 /// Stores extracted metadata for a video file, such as resolution and duration.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct VideoMetadata {
     /// Video resolution (e.g., "1920x1080"). Optional.
     pub resolution: Option<String>,
@@ -114,6 +114,56 @@ fn format_duration_string(duration_str: &str) -> Option<String> {
             None
         }
     }
+}
+
+/// Parses the raw JSON output from ffprobe into `VideoMetadata`.
+///
+/// This function is extracted to facilitate unit testing without needing the `ffprobe` executable.
+///
+/// # Arguments
+///
+/// * `json_str` - The JSON output string from ffprobe.
+///
+/// # Errors
+///
+/// Returns an error if the JSON cannot be parsed.
+pub fn parse_ffprobe_output(json_str: &str) -> Result<VideoMetadata, Box<dyn std::error::Error>> {
+    let parsed_data: FfprobeOutput = serde_json::from_str(json_str).map_err(|e| {
+        eprintln!(
+            "Failed to parse JSON output: {}. Raw output:\n---\n{}\n---",
+            e, json_str
+        );
+        FfprobeError::with_source("failed to parse JSON output", e)
+    })?;
+
+    let mut video_info = VideoMetadata::default();
+
+    if let Some(stream) = parsed_data
+        .streams
+        .iter()
+        .find(|s| s.codec_type.as_deref() == Some("video"))
+    {
+        if let (Some(width), Some(height)) = (stream.width, stream.height) {
+            if width > 0 && height > 0 {
+                video_info.resolution = Some(format!("{}x{}", width, height));
+            }
+        }
+    }
+
+    // Prefer format.duration, fallback to video stream duration.
+    let duration_str_opt = parsed_data.format.duration.as_ref().or_else(|| {
+        parsed_data
+            .streams
+            .iter()
+            .find(|s| s.codec_type.as_deref() == Some("video"))
+            .and_then(|s| s.duration.as_ref())
+    });
+
+    if let Some(duration_str) = duration_str_opt {
+        video_info.duration = format_duration_string(duration_str);
+    }
+
+    Ok(video_info)
 }
 
 /// Retrieves video metadata by running `ffprobe`.
@@ -205,41 +255,69 @@ pub fn get_video_metadata(file_path: &Path) -> Result<VideoMetadata, Box<dyn std
 
     // --- Parse ffprobe JSON Output ---
     let json_str = String::from_utf8_lossy(&output.stdout);
-    let parsed_data: FfprobeOutput = serde_json::from_str(&json_str).map_err(|e| {
-        eprintln!(
-            "Failed to parse JSON output: {}. Raw output:\n---\n{}\n---",
-            e, json_str
-        );
-        FfprobeError::with_source("failed to parse JSON output", e)
-    })?;
+    parse_ffprobe_output(&json_str)
+}
 
-    // --- Extract Metadata ---
-    let mut video_info = VideoMetadata::default();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    if let Some(stream) = parsed_data
-        .streams
-        .iter()
-        .find(|s| s.codec_type.as_deref() == Some("video"))
-    {
-        if let (Some(width), Some(height)) = (stream.width, stream.height) {
-            if width > 0 && height > 0 {
-                video_info.resolution = Some(format!("{}x{}", width, height));
+    #[test]
+    fn test_format_duration_string() {
+        assert_eq!(format_duration_string("100.5"), Some("01:41".to_string()));
+        assert_eq!(format_duration_string("3665"), Some("01:01:05".to_string()));
+        assert_eq!(format_duration_string("0"), Some("00:00".to_string()));
+        assert_eq!(format_duration_string("-5"), None); // Should return None and warn
+        assert_eq!(format_duration_string("invalid"), None);
+    }
+
+    #[test]
+    fn test_parse_ffprobe_output_full() {
+        let json = r#"
+        {
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "width": 1920,
+                    "height": 1080,
+                    "duration": "100.0"
+                },
+                {
+                    "codec_type": "audio"
+                }
+            ],
+            "format": {
+                "duration": "100.0"
             }
         }
+        "#;
+        let metadata = parse_ffprobe_output(json).unwrap();
+        assert_eq!(metadata.resolution, Some("1920x1080".to_string()));
+        assert_eq!(metadata.duration, Some("01:40".to_string()));
     }
 
-    // Prefer format.duration, fallback to video stream duration.
-    let duration_str_opt = parsed_data.format.duration.as_ref().or_else(|| {
-        parsed_data
-            .streams
-            .iter()
-            .find(|s| s.codec_type.as_deref() == Some("video"))
-            .and_then(|s| s.duration.as_ref())
-    });
-
-    if let Some(duration_str) = duration_str_opt {
-        video_info.duration = format_duration_string(duration_str);
+    #[test]
+    fn test_parse_ffprobe_output_missing_video_stream() {
+        let json = r#"
+        {
+            "streams": [
+                {
+                    "codec_type": "audio"
+                }
+            ],
+            "format": {
+                "duration": "50.0"
+            }
+        }
+        "#;
+        let metadata = parse_ffprobe_output(json).unwrap();
+        assert_eq!(metadata.resolution, None);
+        assert_eq!(metadata.duration, Some("00:50".to_string()));
     }
 
-    Ok(video_info)
+    #[test]
+    fn test_parse_ffprobe_output_malformed_json() {
+        let json = r#" { "invalid": } "#;
+        assert!(parse_ffprobe_output(json).is_err());
+    }
 }

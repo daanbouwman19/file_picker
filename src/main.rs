@@ -104,7 +104,7 @@ fn initialize_app_state(
     env_logger::init(); // Initialize logger
     let cli_args = Cli::parse(); // Parse command line arguments
     let theme = ColorfulTheme::default(); // Set default theme for dialoguer
-    let history = load_history()?; // Load historical data
+    let history = load_history(None)?; // Load historical data
     Ok((cli_args, theme, history))
 }
 
@@ -628,7 +628,7 @@ async fn run_app() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         display_selected_video_info(&selected_video_entry);
-        add_to_history(&mut history, &selected_video_entry.path)?; // Update history
+        add_to_history(&mut history, &selected_video_entry.path, None)?; // Update history
 
         // 4.6. Handle User Actions for the Selected Video (Inner Loop)
         let action_outcome = loop_user_actions(
