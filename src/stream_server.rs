@@ -51,3 +51,46 @@ pub fn run_server(
 
     Ok(server)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::{test, App};
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[actix_web::test]
+    async fn test_stream_video_no_selection() {
+        let state: StreamState = Arc::new(Mutex::new(None));
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state.clone()))
+                .route("/stream", web::get().to(stream_video))
+        ).await;
+
+        let req = test::TestRequest::get().uri("/stream").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), actix_web::http::StatusCode::NOT_FOUND);
+    }
+
+    #[actix_web::test]
+    async fn test_stream_video_with_selection() {
+        // Create a dummy video file
+        let mut temp_file = NamedTempFile::new().unwrap();
+        writeln!(temp_file, "dummy video content").unwrap();
+        let temp_path = temp_file.path().to_path_buf();
+
+        let state: StreamState = Arc::new(Mutex::new(Some(temp_path)));
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(state.clone()))
+                .route("/stream", web::get().to(stream_video))
+        ).await;
+
+        let req = test::TestRequest::get().uri("/stream").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), actix_web::http::StatusCode::OK);
+    }
+}

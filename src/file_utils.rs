@@ -85,5 +85,65 @@ pub fn find_video_files(
             }
         }
     }
+    // Sort for deterministic output in tests and UI
+    video_files.sort();
     Ok(video_files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+    use std::fs::File;
+
+    #[test]
+    fn test_find_video_files_recursive() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create files
+        File::create(root.join("video1.mp4")).unwrap();
+        File::create(root.join("image.jpg")).unwrap();
+
+        let subdir = root.join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        File::create(subdir.join("video2.mkv")).unwrap();
+
+        let files = find_video_files(root, true).unwrap();
+        assert_eq!(files.len(), 2);
+
+        let file_names: Vec<String> = files.iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+            .collect();
+
+        assert!(file_names.contains(&"video1.mp4".to_string()));
+        assert!(file_names.contains(&"video2.mkv".to_string()));
+    }
+
+    #[test]
+    fn test_find_video_files_non_recursive() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Create files
+        File::create(root.join("video1.mp4")).unwrap();
+
+        let subdir = root.join("subdir");
+        fs::create_dir(&subdir).unwrap();
+        File::create(subdir.join("video2.mkv")).unwrap();
+
+        let files = find_video_files(root, false).unwrap();
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].file_name().unwrap().to_string_lossy(), "video1.mp4");
+    }
+
+    #[test]
+    fn test_find_video_files_invalid_dir() {
+        let dir = tempdir().unwrap();
+        let file_path = dir.path().join("file.txt");
+        File::create(&file_path).unwrap();
+
+        let result = find_video_files(&file_path, true);
+        assert!(result.is_err());
+    }
 }
